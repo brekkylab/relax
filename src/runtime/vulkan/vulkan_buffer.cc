@@ -44,9 +44,13 @@ VulkanBuffer::VulkanBuffer(const VulkanDevice& device, size_t nbytes, VkBufferUs
   VkBufferCreateInfo buffer_info = MakeBufferCreateInfo(nbytes, usage);
   VULKAN_CALL(vkCreateBuffer(device, &buffer_info, nullptr, &buffer));
 
+  // Get correct memory requirements
+  VkMemoryRequirements mem_reqs;
+  vkGetBufferMemoryRequirements(device, buffer, &mem_reqs);
+
   // Allocate memory
   VkMemoryAllocateInfo mem_info = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  mem_info.allocationSize = buffer_info.size;
+  mem_info.allocationSize = mem_reqs.size;
   mem_info.memoryTypeIndex = mem_type_index;
 
   VkMemoryDedicatedAllocateInfoKHR dedicated_info = {
