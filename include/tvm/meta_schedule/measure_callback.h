@@ -22,13 +22,13 @@
 
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 #include <tvm/meta_schedule/builder.h>
 #include <tvm/meta_schedule/measure_candidate.h>
 #include <tvm/meta_schedule/runner.h>
 #include <tvm/meta_schedule/search_strategy.h>
 #include <tvm/meta_schedule/tune_context.h>
-#include <tvm/node/reflection.h>
 #include <tvm/runtime/object.h>
 
 namespace tvm {
@@ -42,7 +42,10 @@ class MeasureCallbackNode : public runtime::Object {
   /*! \brief Virtual destructor. */
   virtual ~MeasureCallbackNode() = default;
 
-  void VisitAttrs(tvm::AttrVisitor* v) {}
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<MeasureCallbackNode>();
+  }
 
   /*!
    * \brief Apply a measure callback rule with given arguments.
@@ -52,14 +55,14 @@ class MeasureCallbackNode : public runtime::Object {
    * \param builder_results The builder results by building the measure candidates.
    * \param runner_results The runner results by running the built measure candidates.
    */
-  virtual void Apply(const TaskScheduler& task_scheduler,                //
-                     int task_id,                                        //
-                     const Array<MeasureCandidate>& measure_candidates,  //
-                     const Array<BuilderResult>& builder_results,        //
-                     const Array<RunnerResult>& runner_results) = 0;
+  virtual void Apply(const TaskScheduler& task_scheduler,                     //
+                     int task_id,                                             //
+                     const ffi::Array<MeasureCandidate>& measure_candidates,  //
+                     const ffi::Array<BuilderResult>& builder_results,        //
+                     const ffi::Array<RunnerResult>& runner_results) = 0;
 
-  static constexpr const char* _type_key = "meta_schedule.MeasureCallback";
-  TVM_DECLARE_BASE_OBJECT_INFO(MeasureCallbackNode, Object);
+  static constexpr const bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("meta_schedule.MeasureCallback", MeasureCallbackNode, Object);
 };
 
 /*! \brief The measure callback with customized methods on the python-side. */
@@ -74,35 +77,36 @@ class PyMeasureCallbackNode : public MeasureCallbackNode {
    * \param results The runner results by running the built measure candidates.
    * \return Whether the measure callback was successfully applied.
    */
-  using FApply = ffi::TypedFunction<void(const TaskScheduler& task_scheduler,                //
-                                         int task_id,                                        //
-                                         const Array<MeasureCandidate>& measure_candidates,  //
-                                         const Array<BuilderResult>& builds,                 //
-                                         const Array<RunnerResult>& results)>;
+  using FApply = ffi::TypedFunction<void(const TaskScheduler& task_scheduler,                     //
+                                         int task_id,                                             //
+                                         const ffi::Array<MeasureCandidate>& measure_candidates,  //
+                                         const ffi::Array<BuilderResult>& builds,                 //
+                                         const ffi::Array<RunnerResult>& results)>;
   /*!
    * \brief Get the measure callback function as string with name.
    * \return The string of the measure callback function.
    */
-  using FAsString = ffi::TypedFunction<String()>;
+  using FAsString = ffi::TypedFunction<ffi::String()>;
 
   /*! \brief The packed function to the `Apply` function. */
   FApply f_apply;
   /*! \brief The packed function to the `AsString` function. */
   FAsString f_as_string;
 
-  void VisitAttrs(tvm::AttrVisitor* v) {
-    // `f_apply` is not visited
-    // `f_as_string` is not visited
+  static void RegisterReflection() {
+    // `f_apply` is not registered
+    // `f_as_string` is not registered
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<PyMeasureCallbackNode>();
   }
 
-  void Apply(const TaskScheduler& task_scheduler,                //
-             int task_id,                                        //
-             const Array<MeasureCandidate>& measure_candidates,  //
-             const Array<BuilderResult>& builds,                 //
-             const Array<RunnerResult>& results);
-
-  static constexpr const char* _type_key = "meta_schedule.PyMeasureCallback";
-  TVM_DECLARE_FINAL_OBJECT_INFO(PyMeasureCallbackNode, MeasureCallbackNode);
+  void Apply(const TaskScheduler& task_scheduler,                     //
+             int task_id,                                             //
+             const ffi::Array<MeasureCandidate>& measure_candidates,  //
+             const ffi::Array<BuilderResult>& builds,                 //
+             const ffi::Array<RunnerResult>& results);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("meta_schedule.PyMeasureCallback", PyMeasureCallbackNode,
+                                    MeasureCallbackNode);
 };
 
 /*!
@@ -135,8 +139,8 @@ class MeasureCallback : public runtime::ObjectRef {
   TVM_DLL static MeasureCallback PyMeasureCallback(PyMeasureCallbackNode::FApply f_apply,
                                                    PyMeasureCallbackNode::FAsString f_as_string);
   /*! \brief The default list of measure callbacks. */
-  TVM_DLL static Array<MeasureCallback, void> Default();
-  TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(MeasureCallback, ObjectRef, MeasureCallbackNode);
+  TVM_DLL static ffi::Array<MeasureCallback, void> Default();
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(MeasureCallback, ObjectRef, MeasureCallbackNode);
 };
 
 }  // namespace meta_schedule

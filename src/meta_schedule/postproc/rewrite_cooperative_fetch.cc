@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+#include <tvm/ffi/reflection/registry.h>
+
 #include "../utils.h"
 
 namespace tvm {
@@ -28,14 +30,15 @@ namespace tir {
  * \param axis The axis name expected
  * \return std::nullopt if parsing fails; Otherwise, the extent of thread axis
  */
-Optional<Integer> ParseThreadBinding(const Schedule& sch, const Instruction& inst, String axis) {
+ffi::Optional<Integer> ParseThreadBinding(const Schedule& sch, const Instruction& inst,
+                                          ffi::String axis) {
   static InstructionKind inst_kind_bind = InstructionKind::Get("Bind");
   if (!inst->kind.same_as(inst_kind_bind)) {
     return std::nullopt;
   }
   ICHECK_EQ(inst->inputs.size(), 1);
   ICHECK_EQ(inst->attrs.size(), 1);
-  String thread_axis = Downcast<String>(inst->attrs[0]);
+  ffi::String thread_axis = Downcast<ffi::String>(inst->attrs[0]);
   if (thread_axis != axis) {
     return std::nullopt;
   }
@@ -49,15 +52,15 @@ Optional<Integer> ParseThreadBinding(const Schedule& sch, const Instruction& ins
  * \param vector_lane The number of vector lane in vectorized cooperative fetching
  * \return std::nullopt if parsing fails; Otherwise, the annotated block
  */
-Optional<BlockRV> ParseAnnotate(const Schedule& sch, const Instruction& inst,
-                                int64_t* vector_lane) {
+ffi::Optional<BlockRV> ParseAnnotate(const Schedule& sch, const Instruction& inst,
+                                     int64_t* vector_lane) {
   static InstructionKind inst_kind_annotate = InstructionKind::Get("Annotate");
   if (!inst->kind.same_as(inst_kind_annotate)) {
     return std::nullopt;
   }
   ICHECK_EQ(inst->inputs.size(), 2);
   ICHECK_EQ(inst->attrs.size(), 1);
-  String ann_key = Downcast<String>(inst->attrs[0]);
+  ffi::String ann_key = Downcast<ffi::String>(inst->attrs[0]);
   if (ann_key != attr::meta_schedule_cooperative_fetch) {
     return std::nullopt;
   }
@@ -78,7 +81,7 @@ bool ParseWarpExecutionAnn(const Schedule& sch, const Instruction& inst) {
   }
   ICHECK_EQ(inst->inputs.size(), 2);
   ICHECK_EQ(inst->attrs.size(), 1);
-  String ann_key = Downcast<String>(inst->attrs[0]);
+  ffi::String ann_key = Downcast<ffi::String>(inst->attrs[0]);
   return ann_key == attr::warp_execution;
 }
 
@@ -115,9 +118,14 @@ namespace meta_schedule {
  */
 class RewriteCooperativeFetchNode : public PostprocNode {
  public:
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<RewriteCooperativeFetchNode>();
+  }
+
   // Inherited from PostprocNode
   void InitializeWithTuneContext(const TuneContext& context) final {
-    if (Optional<Integer> v = context->target.value()->GetAttr<Integer>("thread_warp_size")) {
+    if (ffi::Optional<Integer> v = context->target.value()->GetAttr<Integer>("thread_warp_size")) {
       this->thread_warp_size_ = v.value()->value;
     } else {
       TVM_PY_LOG(INFO, context->logger) << "'thread_warp_size' is not defined in the target";
@@ -128,14 +136,12 @@ class RewriteCooperativeFetchNode : public PostprocNode {
   bool Apply(const tir::Schedule& sch) final;
 
   Postproc Clone() const {
-    ObjectPtr<RewriteCooperativeFetchNode> n = make_object<RewriteCooperativeFetchNode>(*this);
+    ObjectPtr<RewriteCooperativeFetchNode> n = ffi::make_object<RewriteCooperativeFetchNode>(*this);
     return Postproc(n);
   }
 
-  void VisitAttrs(tvm::AttrVisitor* v) {}
-
-  static constexpr const char* _type_key = "meta_schedule.RewriteCooperativeFetch";
-  TVM_DECLARE_FINAL_OBJECT_INFO(RewriteCooperativeFetchNode, PostprocNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("meta_schedule.RewriteCooperativeFetch",
+                                    RewriteCooperativeFetchNode, PostprocNode);
 
  private:
   int thread_warp_size_ = -1;
@@ -148,11 +154,13 @@ bool RewriteCooperativeFetchNode::Apply(const tir::Schedule& sch) {
   int64_t vector_lane = 1;
   std::vector<std::function<void()>> tasks;
   for (const tir::Instruction& inst : trace->insts) {
-    if (Optional<Integer> new_thread_extent = tir::ParseThreadBinding(sch, inst, "threadIdx.x")) {
+    if (ffi::Optional<Integer> new_thread_extent =
+            tir::ParseThreadBinding(sch, inst, "threadIdx.x")) {
       thread_extent_x = new_thread_extent.value()->value;
       continue;
     }
-    if (Optional<Integer> new_thread_extent = tir::ParseThreadBinding(sch, inst, "threadIdx.y")) {
+    if (ffi::Optional<Integer> new_thread_extent =
+            tir::ParseThreadBinding(sch, inst, "threadIdx.y")) {
       thread_extent_y = new_thread_extent.value()->value;
       continue;
     }
@@ -160,7 +168,7 @@ bool RewriteCooperativeFetchNode::Apply(const tir::Schedule& sch) {
       thread_extent_x = thread_warp_size_;
       continue;
     }
-    Optional<tir::BlockRV> opt_block_rv = tir::ParseAnnotate(sch, inst, &vector_lane);
+    ffi::Optional<tir::BlockRV> opt_block_rv = tir::ParseAnnotate(sch, inst, &vector_lane);
     if (!opt_block_rv.defined()) {
       continue;
     }
@@ -186,29 +194,30 @@ bool RewriteCooperativeFetchNode::Apply(const tir::Schedule& sch) {
       }
       if (thread_extent_y != -1) {
         if (vector_lane > 1) {
-          Array<tir::LoopRV> split = sch->Split(fused, {std::nullopt,              //
-                                                        Integer(thread_extent_y),  //
-                                                        Integer(thread_extent_x),  //
-                                                        Integer(vector_lane)});
+          ffi::Array<tir::LoopRV> split = sch->Split(fused, {std::nullopt,              //
+                                                             Integer(thread_extent_y),  //
+                                                             Integer(thread_extent_x),  //
+                                                             Integer(vector_lane)});
           sch->Vectorize(split[3]);
           sch->Bind(split[2], "threadIdx.x");
           sch->Bind(split[1], "threadIdx.y");
         } else {
-          Array<tir::LoopRV> split = sch->Split(fused, {std::nullopt,              //
-                                                        Integer(thread_extent_y),  //
-                                                        Integer(thread_extent_x)});
+          ffi::Array<tir::LoopRV> split = sch->Split(fused, {std::nullopt,              //
+                                                             Integer(thread_extent_y),  //
+                                                             Integer(thread_extent_x)});
           sch->Bind(split[2], "threadIdx.x");
           sch->Bind(split[1], "threadIdx.y");
         }
       } else {
         if (vector_lane > 1) {
-          Array<tir::LoopRV> split = sch->Split(fused, {std::nullopt,              //
-                                                        Integer(thread_extent_x),  //
-                                                        Integer(vector_lane)});
+          ffi::Array<tir::LoopRV> split = sch->Split(fused, {std::nullopt,              //
+                                                             Integer(thread_extent_x),  //
+                                                             Integer(vector_lane)});
           sch->Vectorize(split[2]);
           sch->Bind(split[1], "threadIdx.x");
         } else {
-          Array<tir::LoopRV> split = sch->Split(fused, {std::nullopt, Integer(thread_extent_x)});
+          ffi::Array<tir::LoopRV> split =
+              sch->Split(fused, {std::nullopt, Integer(thread_extent_x)});
           sch->Bind(split[1], "threadIdx.x");
         }
       }
@@ -222,13 +231,17 @@ bool RewriteCooperativeFetchNode::Apply(const tir::Schedule& sch) {
 }
 
 Postproc Postproc::RewriteCooperativeFetch() {
-  ObjectPtr<RewriteCooperativeFetchNode> n = make_object<RewriteCooperativeFetchNode>();
+  ObjectPtr<RewriteCooperativeFetchNode> n = ffi::make_object<RewriteCooperativeFetchNode>();
   return Postproc(n);
 }
 
-TVM_REGISTER_NODE_TYPE(RewriteCooperativeFetchNode);
-TVM_FFI_REGISTER_GLOBAL("meta_schedule.PostprocRewriteCooperativeFetch")
-    .set_body_typed(Postproc::RewriteCooperativeFetch);
+TVM_FFI_STATIC_INIT_BLOCK() { RewriteCooperativeFetchNode::RegisterReflection(); }
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("meta_schedule.PostprocRewriteCooperativeFetch",
+                        Postproc::RewriteCooperativeFetch);
+}
 
 }  // namespace meta_schedule
 }  // namespace tvm

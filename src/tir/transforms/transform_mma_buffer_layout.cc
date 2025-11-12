@@ -18,6 +18,7 @@
  */
 
 #include <tvm/arith/analyzer.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/tir/analysis.h>
 #include <tvm/tir/index_map.h>
 #include <tvm/tir/stmt_functor.h>
@@ -43,7 +44,7 @@ namespace tir {
 class MmaBufferLayoutTransformer : public StmtExprMutator {
  public:
   Stmt VisitStmt_(const BlockNode* op) {
-    Block block = GetRef<Block>(op);
+    Block block = ffi::GetRef<Block>(op);
     auto* n = block.CopyOnWrite();
     auto fmutate = [this](const Buffer& buffer) {
       // m16n8k8.matrix[A/B/C] buffers are composed ofseveral small blocks. Assume the block's
@@ -71,7 +72,8 @@ class MmaBufferLayoutTransformer : public StmtExprMutator {
                                         buffer->axis_separators);
         this->buffer_map_.insert({buffer, new_buffer});
         this->buffer_var_map_.insert({buffer->data, new_buffer->data});
-        return std::move(new_buffer);
+        return new_buffer;
+
       } else if (buffer.scope() == "m16n8k8.matrixA") {
         // m16n8k8.matrixA
         // bi = 32, bj = 8
@@ -92,7 +94,8 @@ class MmaBufferLayoutTransformer : public StmtExprMutator {
                                         buffer->axis_separators);
         this->buffer_map_.insert({buffer, new_buffer});
         this->buffer_var_map_.insert({buffer->data, new_buffer->data});
-        return std::move(new_buffer);
+        return new_buffer;
+
       } else if (buffer.scope() == "m16n8k8.matrixB") {
         // m16n8k8.matrixB
         // bj = 8, bj = 32
@@ -113,7 +116,7 @@ class MmaBufferLayoutTransformer : public StmtExprMutator {
                                         buffer->axis_separators);
         this->buffer_map_.insert({buffer, new_buffer});
         this->buffer_var_map_.insert({buffer->data, new_buffer->data});
-        return std::move(new_buffer);
+        return new_buffer;
       }
       return buffer;
     };
@@ -138,7 +141,7 @@ class MmaBufferLayoutTransformer : public StmtExprMutator {
         n->buffer = buffer_map_[store->buffer];
       }
     }
-    return std::move(store);
+    return store;
   }
 
   PrimExpr VisitExpr_(const BufferLoadNode* op) {
@@ -157,14 +160,14 @@ class MmaBufferLayoutTransformer : public StmtExprMutator {
         n->buffer = buffer_map_[load->buffer];
       }
     }
-    return std::move(load);
+    return load;
   }
 
   PrimExpr VisitExpr_(const VarNode* op) {
-    if (buffer_var_map_.count(GetRef<Var>(op))) {
-      return buffer_var_map_[GetRef<Var>(op)];
+    if (buffer_var_map_.count(ffi::GetRef<Var>(op))) {
+      return buffer_var_map_[ffi::GetRef<Var>(op)];
     }
-    return GetRef<Var>(op);
+    return ffi::GetRef<Var>(op);
   }
 
  private:
@@ -184,8 +187,10 @@ Pass TransformMmaBufferLayout() {
   return CreatePrimFuncPass(pass_func, 0, "tir.TransformMmaBufferLayout", {});
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.transform.TransformMmaBufferLayout")
-    .set_body_typed(TransformMmaBufferLayout);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.transform.TransformMmaBufferLayout", TransformMmaBufferLayout);
+}
 }  // namespace transform
 
 }  // namespace tir

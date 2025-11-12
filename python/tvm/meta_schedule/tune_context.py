@@ -21,10 +21,11 @@ from typing import TYPE_CHECKING, List, Optional, Union
 # isort: off
 from typing_extensions import Literal
 
+from tvm_ffi import register_object, register_global_func
+
 # isort: on
 
 from tvm import IRModule
-from tvm.ffi import register_object, register_func
 from tvm.runtime import Object
 from tvm.target import Target
 from tvm.tir import PrimFunc, Schedule
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
     from .space_generator import SpaceGenerator
 
 
-@register_func("tvm.meta_schedule.normalize_mod")
+@register_global_func("tvm.meta_schedule.normalize_mod")
 def _normalize_mod(mod: Union[PrimFunc, IRModule]) -> IRModule:
     """Normalize the input to an IRModule"""
     if isinstance(mod, PrimFunc):
@@ -52,9 +53,8 @@ def _normalize_mod(mod: Union[PrimFunc, IRModule]) -> IRModule:
     if not isinstance(mod, IRModule):
         raise TypeError(f"Expected `mod` to be PrimFunc or IRModule, but gets: {mod}")
     func_names = mod.get_global_vars()
-    (func_name,) = func_names
-    if len(func_names) == 1 and func_name.name_hint != "main":
-        mod = IRModule({"main": mod[func_name]})
+    if len(func_names) == 1 and func_names[0].name_hint != "main":
+        mod = IRModule({"main": mod[func_names[0]]})
     return mod
 
 

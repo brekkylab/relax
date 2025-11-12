@@ -26,6 +26,8 @@
 
 namespace tvm {
 
+TVM_FFI_STATIC_INIT_BLOCK() { MemoryInfoNode::RegisterReflection(); }
+
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<MemoryInfoNode>([](const ObjectRef& node, ReprPrinter* p) {
       auto* op = static_cast<const MemoryInfoNode*>(node.get());
@@ -35,8 +37,6 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
                 << "max_simd_bits=" << op->max_simd_bits << ", "
                 << "head_address=" << op->head_address << ")";
     });
-
-TVM_REGISTER_NODE_TYPE(MemoryInfoNode);
 
 MemoryInfo GetMemoryInfo(const std::string& scope) {
   std::string fname = "tvm.info.mem." + scope;

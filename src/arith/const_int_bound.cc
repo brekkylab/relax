@@ -22,6 +22,7 @@
  */
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/tir/builtin.h>
 #include <tvm/tir/expr_functor.h>
 
@@ -38,10 +39,10 @@ namespace arith {
 
 using namespace tir;
 
-TVM_REGISTER_NODE_TYPE(ConstIntBoundNode);
+TVM_FFI_STATIC_INIT_BLOCK() { ConstIntBoundNode::RegisterReflection(); }
 
 ConstIntBound::ConstIntBound(int64_t min_value, int64_t max_value) {
-  auto node = make_object<ConstIntBoundNode>();
+  auto node = ffi::make_object<ConstIntBoundNode>();
   node->min_value = min_value;
   node->max_value = max_value;
   data_ = std::move(node);
@@ -51,7 +52,10 @@ ConstIntBound MakeConstIntBound(int64_t min_value, int64_t max_value) {
   return ConstIntBound(min_value, max_value);
 }
 
-TVM_FFI_REGISTER_GLOBAL("arith.ConstIntBound").set_body_typed(MakeConstIntBound);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("arith.ConstIntBound", MakeConstIntBound);
+}
 
 inline void PrintBoundValue(std::ostream& os, int64_t val) {
   if (val == ConstIntBound::kPosInf) {
@@ -98,6 +102,7 @@ struct ConstIntBoundAnalyzer::Entry {
 class ConstIntBoundAnalyzer::Impl
     : public ExprFunctor<ConstIntBoundAnalyzer::Entry(const PrimExpr&)> {
  public:
+  explicit Impl(Analyzer* parent) : parent_(parent) {}
   /*! \brief additional bound info about expr in bound */
   struct BoundInfo {
     /*! \brief The expr */
@@ -108,6 +113,8 @@ class ConstIntBoundAnalyzer::Impl
     BoundInfo() {}
     BoundInfo(PrimExpr expr, Entry bound) : expr(expr), bound(bound) {}
   };
+
+  bool IsBound(const Var& var) const { return var_map_.find(var) != var_map_.end(); }
 
   void Bind(const Var& var, const Range& range, bool allow_override) {
     Entry a = VisitExpr(range->min);
@@ -272,6 +279,33 @@ class ConstIntBoundAnalyzer::Impl
 
     if (b.min_value > 0) {
       int64_t b_max_cap = InfAwareAdd(b.max_value, -1);
+
+      // Try to get tighter bounds using modular set information
+      if (parent_ && b.min_value == b.max_value) {
+        ModularSet mod_a = parent_->modular_set(op->a);
+        int64_t modulus = b.min_value;
+        int64_t gcd_coeff_mod = ZeroAwareGCD(mod_a->coeff, modulus);
+
+        // If gcd_coeff_mod > 1, we can get tighter bounds
+        // The result will be of the form gcd_coeff_mod * k + (base % modulus)
+        // where k ranges to cover [0, modulus - gcd_coeff_mod]
+        //
+        // Example: expr = (bx * 2048 + tx * 16) % 7168
+        //          where bx in [0, 3584), tx in [0, 128)
+        //          ModularSet(expr) = 16*k (coeff=16, base=0)
+        //          GCD(16, 7168) = 16
+        //          Result can only be {0, 16, 32, ..., 7152}
+        //          Without this optimization: bound = [0, 7167]
+        //          With this optimization: bound = [0, 7152]
+        if (gcd_coeff_mod > 1) {
+          int64_t base_mod = mod_a->base % modulus;
+          if (base_mod < 0) base_mod += modulus;
+          int64_t tight_max = modulus - gcd_coeff_mod + base_mod;
+          if (tight_max >= modulus) tight_max -= modulus;
+          return MakeBound(base_mod, tight_max);
+        }
+      }
+
       if (a.min_value >= 0) {
         // 0 <= [a_min, a_max] < b_min
         if (a.max_value < b.min_value) return a;
@@ -318,6 +352,32 @@ class ConstIntBoundAnalyzer::Impl
 
     if (b.min_value > 0) {
       int64_t b_max_cap = InfAwareAdd(b.max_value, -1);
+      // Try to get tighter bounds using modular set information
+      if (parent_ && b.min_value == b.max_value) {
+        ModularSet mod_a = parent_->modular_set(op->a);
+        int64_t modulus = b.min_value;
+        int64_t gcd_coeff_mod = ZeroAwareGCD(mod_a->coeff, modulus);
+
+        // If gcd_coeff_mod > 1, we can get tighter bounds
+        // The result will be of the form gcd_coeff_mod * k + (base % modulus)
+        // where k ranges to cover [0, modulus - gcd_coeff_mod]
+        //
+        // Example: expr = (bx * 2048 + tx * 16) % 7168
+        //          where bx in [0, 3584), tx in [0, 128)
+        //          ModularSet(expr) = 16*k (coeff=16, base=0)
+        //          GCD(16, 7168) = 16
+        //          Result can only be {0, 16, 32, ..., 7152}
+        //          Without this optimization: bound = [0, 7167]
+        //          With this optimization: bound = [0, 7152]
+        if (gcd_coeff_mod > 1) {
+          int64_t base_mod = mod_a->base % modulus;
+          if (base_mod < 0) base_mod += modulus;
+          int64_t tight_max = modulus - gcd_coeff_mod + base_mod;
+          if (tight_max >= modulus) tight_max -= modulus;
+          return MakeBound(base_mod, tight_max);
+        }
+      }
+
       if (a.min_value >= 0) {
         // 0 <= [a_min, a_max] < b_min
         if (a.max_value < b.min_value) return a;
@@ -381,7 +441,7 @@ class ConstIntBoundAnalyzer::Impl
   }
 
   Entry VisitExpr_(const VarNode* op) final {
-    Var v = GetRef<Var>(op);
+    Var v = ffi::GetRef<Var>(op);
     auto it = var_map_.find(v);
     if (it != var_map_.end()) {
       return it->second;
@@ -391,7 +451,7 @@ class ConstIntBoundAnalyzer::Impl
   }
 
   Entry VisitExpr_(const SizeVarNode* op) final {
-    SizeVar v = GetRef<SizeVar>(op);
+    SizeVar v = ffi::GetRef<SizeVar>(op);
     auto it = var_map_.find(v);
     if (it != var_map_.end()) {
       return it->second;
@@ -452,6 +512,8 @@ class ConstIntBoundAnalyzer::Impl
 
  private:
   friend class ConstIntBoundAnalyzer;
+  // parent analyzer
+  Analyzer* parent_;
   // internal variable map
   std::unordered_map<Var, Entry> var_map_;
   // additional bound info
@@ -519,6 +581,7 @@ class ConstIntBoundAnalyzer::Impl
     // If the range of b does not have 0, use BinaryOpBoundary.
     return BinaryOpBoundary(a, b, op);
   }
+
   /*!
    * \brief Compute x + y, aware of inf.
    * \param x The left operand.
@@ -738,7 +801,7 @@ class ConstIntBoundAnalyzer::Impl
    * This expression is used as the implementation of
    * topi.math.ceil_log2, and can appear in iteration bounds.
    */
-  static Optional<PrimExpr> FindCeilLog2Arg(const CastNode* op) {
+  static ffi::Optional<PrimExpr> FindCeilLog2Arg(const CastNode* op) {
     if (op->dtype.is_int()) {
       if (auto as_call = op->value.as<CallNode>()) {
         if (as_call->op.same_as(Op::Get("tir.ceil"))) {
@@ -793,11 +856,13 @@ void ConstIntBoundAnalyzer::Bind(const Var& var, const Range& range, bool allow_
   impl_->Bind(var, range, allow_override);
 }
 
+bool ConstIntBoundAnalyzer::IsBound(const Var& var) const { return impl_->IsBound(var); }
+
 std::function<void()> ConstIntBoundAnalyzer::EnterConstraint(const PrimExpr& constraint) {
   return impl_->EnterConstraint(constraint);
 }
 
-ConstIntBoundAnalyzer::ConstIntBoundAnalyzer(Analyzer* parent) : impl_(new Impl()) {}
+ConstIntBoundAnalyzer::ConstIntBoundAnalyzer(Analyzer* parent) : impl_(new Impl(parent)) {}
 
 ConstIntBoundAnalyzer::~ConstIntBoundAnalyzer() { delete impl_; }
 

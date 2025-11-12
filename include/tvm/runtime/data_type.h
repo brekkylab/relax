@@ -206,7 +206,9 @@ class DataType {
   /*! \return whether type is a bool vector type. */
   bool is_vector_bool() const { return is_scalable_or_fixed_length_vector() && bits() == 1; }
   /*! \return whether type is a Void type. */
-  bool is_void() const { return code() == DataType::kHandle && bits() == 0 && lanes() == 0; }
+  bool is_void() const {
+    return code() == DataType::kHandle && bits() == 0 && static_cast<int16_t>(data_.lanes) == 0;
+  }
   /*!
    * \brief Create a new data type by change lanes to a specified value.
    * \param lanes The target number of lanes.
@@ -462,17 +464,23 @@ template <>
 struct TypeTraits<runtime::DataType> : public TypeTraitsBase {
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIDataType;
 
-  static TVM_FFI_INLINE void CopyToAnyView(const runtime::DataType& src, TVMFFIAny* result) {
+  TVM_FFI_INLINE static void CopyToAnyView(const runtime::DataType& src, TVMFFIAny* result) {
+    // clear padding part to ensure the equality check can always check the v_uint64 part
+    result->v_uint64 = 0;
+    result->zero_padding = 0;
     result->type_index = TypeIndex::kTVMFFIDataType;
     result->v_dtype = src;
   }
 
-  static TVM_FFI_INLINE void MoveToAny(runtime::DataType src, TVMFFIAny* result) {
+  TVM_FFI_INLINE static void MoveToAny(runtime::DataType src, TVMFFIAny* result) {
+    // clear padding part to ensure the equality check can always check the v_uint64 part
+    result->v_uint64 = 0;
+    result->zero_padding = 0;
     result->type_index = TypeIndex::kTVMFFIDataType;
     result->v_dtype = src;
   }
 
-  static TVM_FFI_INLINE std::optional<runtime::DataType> TryCastFromAnyView(const TVMFFIAny* src) {
+  TVM_FFI_INLINE static std::optional<runtime::DataType> TryCastFromAnyView(const TVMFFIAny* src) {
     auto opt_dtype = TypeTraits<DLDataType>::TryCastFromAnyView(src);
     if (opt_dtype) {
       return runtime::DataType(opt_dtype.value());
@@ -480,15 +488,19 @@ struct TypeTraits<runtime::DataType> : public TypeTraitsBase {
     return std::nullopt;
   }
 
-  static TVM_FFI_INLINE bool CheckAnyStrict(const TVMFFIAny* src) {
+  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
     return TypeTraits<DLDataType>::CheckAnyStrict(src);
   }
 
-  static TVM_FFI_INLINE runtime::DataType CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
+  TVM_FFI_INLINE static runtime::DataType CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
     return runtime::DataType(TypeTraits<DLDataType>::CopyFromAnyViewAfterCheck(src));
   }
 
-  static TVM_FFI_INLINE std::string TypeStr() { return ffi::StaticTypeKey::kTVMFFIDataType; }
+  TVM_FFI_INLINE static std::string TypeStr() { return ffi::StaticTypeKey::kTVMFFIDataType; }
+
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return R"({"type":")" + std::string(ffi::StaticTypeKey::kTVMFFIDataType) + R"("})";
+  }
 };
 
 }  // namespace ffi

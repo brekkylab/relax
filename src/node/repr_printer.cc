@@ -22,8 +22,12 @@
  * \file node/repr_printer.cc
  */
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
+#include <tvm/node/cast.h>
 #include <tvm/node/repr_printer.h>
 #include <tvm/runtime/device_api.h>
+
+#include "../support/str_escape.h"
 
 namespace tvm {
 
@@ -75,6 +79,18 @@ void ReprPrinter::Print(const ffi::Any& node) {
       Print(node.cast<ObjectRef>());
       break;
     }
+    case ffi::TypeIndex::kTVMFFISmallStr:
+    case ffi::TypeIndex::kTVMFFIStr: {
+      ffi::String str = node.cast<ffi::String>();
+      stream << '"' << support::StrEscape(str.data(), str.size()) << '"';
+      break;
+    }
+    case ffi::TypeIndex::kTVMFFISmallBytes:
+    case ffi::TypeIndex::kTVMFFIBytes: {
+      ffi::Bytes bytes = node.cast<ffi::Bytes>();
+      stream << "b\"" << support::StrEscape(bytes.data(), bytes.size()) << '"';
+      break;
+    }
     default: {
       if (auto opt_obj = node.as<ObjectRef>()) {
         Print(opt_obj.value());
@@ -97,48 +113,26 @@ ReprPrinter::FType& ReprPrinter::vtable() {
   return inst;
 }
 
-void ReprLegacyPrinter::Print(const ObjectRef& node) {
-  static const FType& f = vtable();
-  if (!node.defined()) {
-    stream << "(nullptr)";
-  } else if (f.can_dispatch(node)) {
-    f(node, this);
-  } else {
-    try {
-      stream << node;  // Use ReprPrinter
-    } catch (const tvm::Error& e) {
-      LOG(WARNING) << "ReprPrinter fails";
-      stream << node->GetTypeKey() << '(' << node.get() << ')';
-    }
-  }
-}
-
-bool ReprLegacyPrinter::CanDispatch(const ObjectRef& node) {
-  static const FType& f = vtable();
-  return !node.defined() || f.can_dispatch(node);
-}
-
-void ReprLegacyPrinter::PrintIndent() {
-  for (int i = 0; i < indent; ++i) {
-    stream << ' ';
-  }
-}
-
-ReprLegacyPrinter::FType& ReprLegacyPrinter::vtable() {
-  static FType inst;
-  return inst;
-}
-
 void Dump(const runtime::ObjectRef& n) { std::cerr << n << "\n"; }
 
 void Dump(const runtime::Object* n) { Dump(runtime::GetRef<runtime::ObjectRef>(n)); }
 
-TVM_FFI_REGISTER_GLOBAL("node.AsRepr").set_body_typed([](ffi::Any obj) {
-  std::ostringstream os;
-  os << obj;
-  return os.str();
-});
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<ffi::reflection::AccessPathObj>([](const ObjectRef& node, ReprPrinter* p) {
+      p->stream << Downcast<ffi::reflection::AccessPath>(node);
+    });
 
-TVM_FFI_REGISTER_GLOBAL("node.AsLegacyRepr").set_body_typed(ffi::AsLegacyRepr);
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<ffi::reflection::AccessStepObj>([](const ObjectRef& node, ReprPrinter* p) {
+      p->stream << Downcast<ffi::reflection::AccessStep>(node);
+    });
 
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("node.AsRepr", [](ffi::Any obj) {
+    std::ostringstream os;
+    os << obj;
+    return os.str();
+  });
+}
 }  // namespace tvm

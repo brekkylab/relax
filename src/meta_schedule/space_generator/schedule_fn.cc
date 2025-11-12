@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+#include <tvm/ffi/reflection/registry.h>
+
 #include "../utils.h"
 
 namespace tvm {
@@ -29,9 +31,10 @@ class ScheduleFnNode : public SpaceGeneratorNode {
   /*! \brief The schedule function. */
   ffi::Function schedule_fn_;
 
-  void VisitAttrs(tvm::AttrVisitor* v) {
-    SpaceGeneratorNode::VisitAttrs(v);
-    // `schedule_fn_` is not visited.
+  static void RegisterReflection() {
+    // `schedule_fn_` is not registered.
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ScheduleFnNode>();
   }
 
   void InitializeWithTuneContext(const TuneContext& context) final {
@@ -39,7 +42,7 @@ class ScheduleFnNode : public SpaceGeneratorNode {
     this->rand_state_ = ForkSeed(&context->rand_state);
   }
 
-  Array<tir::Schedule> GenerateDesignSpace(const IRModule& mod) final {
+  ffi::Array<tir::Schedule> GenerateDesignSpace(const IRModule& mod) final {
     tir::Schedule sch = tir::Schedule::Traced(
         /*mod=*/mod,
         /*rand_state=*/ForkSeed(&this->rand_state_),
@@ -55,7 +58,7 @@ class ScheduleFnNode : public SpaceGeneratorNode {
       return {sch.value()};
     }
     if (const auto* arr = obj.as<ffi::ArrayObj>()) {
-      Array<tir::Schedule> result;
+      ffi::Array<tir::Schedule> result;
       result.reserve(arr->size());
       for (Any val : *arr) {
         if (auto sch = val.as<tir::Schedule>()) {
@@ -75,20 +78,19 @@ class ScheduleFnNode : public SpaceGeneratorNode {
   }
 
   SpaceGenerator Clone() const final {
-    ObjectPtr<ScheduleFnNode> n = make_object<ScheduleFnNode>(*this);
+    ObjectPtr<ScheduleFnNode> n = ffi::make_object<ScheduleFnNode>(*this);
     CloneRules(this, n.get());
     return SpaceGenerator(n);
   }
 
-  static constexpr const char* _type_key = "meta_schedule.ScheduleFn";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ScheduleFnNode, SpaceGeneratorNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("meta_schedule.ScheduleFn", ScheduleFnNode, SpaceGeneratorNode);
 };
 
-SpaceGenerator SpaceGenerator::ScheduleFn(ffi::Function schedule_fn,
-                                          Optional<Array<ScheduleRule>> sch_rules,
-                                          Optional<Array<Postproc>> postprocs,
-                                          Optional<Map<Mutator, FloatImm>> mutator_probs) {
-  ObjectPtr<ScheduleFnNode> n = make_object<ScheduleFnNode>();
+SpaceGenerator SpaceGenerator::ScheduleFn(
+    ffi::Function schedule_fn, ffi::Optional<ffi::Array<ScheduleRule>> sch_rules,
+    ffi::Optional<ffi::Array<Postproc>> postprocs,
+    ffi::Optional<ffi::Map<Mutator, FloatImm>> mutator_probs) {
+  ObjectPtr<ScheduleFnNode> n = ffi::make_object<ScheduleFnNode>();
   n->sch_rules = std::move(sch_rules);
   n->postprocs = std::move(postprocs);
   n->mutator_probs = std::move(mutator_probs);
@@ -96,9 +98,11 @@ SpaceGenerator SpaceGenerator::ScheduleFn(ffi::Function schedule_fn,
   return SpaceGenerator(n);
 }
 
-TVM_REGISTER_NODE_TYPE(ScheduleFnNode);
-TVM_FFI_REGISTER_GLOBAL("meta_schedule.SpaceGeneratorScheduleFn")
-    .set_body_typed(SpaceGenerator::ScheduleFn);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  ScheduleFnNode::RegisterReflection();
+  refl::GlobalDef().def("meta_schedule.SpaceGeneratorScheduleFn", SpaceGenerator::ScheduleFn);
+}
 
 }  // namespace meta_schedule
 }  // namespace tvm

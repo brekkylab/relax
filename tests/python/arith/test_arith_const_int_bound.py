@@ -51,6 +51,7 @@ class BaseCompare:
 
         for var, bounds in test_case.known_bounds.items():
             analyzer.update(var, ConstIntBound(*bounds))
+            assert analyzer.const_int_bound_is_bound(var)
 
         with contextlib.ExitStack() as stack:
             if test_case.constraint is not None:
@@ -294,6 +295,18 @@ class TestRampBound(BaseCompare):
     a = te.var("a")
     test_case = tvm.testing.parameter(
         TestCase(tvm.tir.Ramp(a, 2, 4) + 2, (2, 128 + 2 * 3 + 2), {a: (0, 128)}),
+    )
+
+
+class TestModularSetBound(BaseCompare):
+    analyzer = tvm.arith.Analyzer()
+    tx = tvm.te.var("tx", dtype="int32")
+    bx = tvm.te.var("bx", dtype="int32")
+
+    expr = (bx * 2048 + tx * 16) % 7168
+
+    test_case = tvm.testing.parameter(
+        TestCase(expr, (0, 7152), {bx: (0, 3584), tx: (0, 128)}),
     )
 
 

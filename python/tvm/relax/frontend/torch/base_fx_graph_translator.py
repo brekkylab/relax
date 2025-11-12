@@ -88,6 +88,22 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
             return tensor.shape
         raise ValueError("Unsupported type: {}".format(type(tensor)))
 
+    @staticmethod
+    def _is_no_bias(bias):
+        """Check if bias represents 'no bias' condition.
+
+        This handles both Python None and relax.op.null_value() expressions
+        that might be used to represent missing bias parameters.
+        """
+        if bias is None:
+            return True
+
+        # Check if this is a null_value expression
+        if isinstance(bias, relax.Call) and bias.op.name == "relax.null_value":
+            return True
+
+        return False
+
     def retrieve_args(self, node: fx.Node):
         return self._retrieve_args(node.args)
 
@@ -102,6 +118,8 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
             return [self._retrieve_args(x) for x in node]
         elif isinstance(node, dict):
             return {self._retrieve_args(k): self._retrieve_args(v) for k, v in node.items()}
+        elif node is None:
+            return None
         else:
             return node
 
@@ -331,6 +349,12 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
         beta = node.args[1] if len(node.args) > 1 else node.kwargs.get("beta", 1.0)
         threshold = node.args[2] if len(node.args) > 2 else node.kwargs.get("threshold", 20.0)
         return self.block_builder.emit(relax.op.nn.softplus(x, beta, threshold))
+
+    def _softsign(self, node: fx.Node) -> relax.Var:
+        x = self.env[node.args[0]]
+        abs_x = self.block_builder.emit(relax.op.abs(x))
+        denom = self.block_builder.emit(relax.op.add(abs_x, relax.const(1.0, dtype="float32")))
+        return self.block_builder.emit(relax.op.divide(x, denom))
 
     def _softshrink(self, node: fx.Node) -> relax.Var:
         """
@@ -750,7 +774,7 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
             )
         )
 
-        if bias is None:
+        if self._is_no_bias(bias):
             return conv1d_transpose
 
         assert len(self.shape_of(bias)) == 1
@@ -804,7 +828,7 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
             )
         )
 
-        if bias is None:
+        if self._is_no_bias(bias):
             return conv2d_transpose
 
         assert len(self.shape_of(bias)) == 1
@@ -856,7 +880,7 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
             )
         )
 
-        if bias is None:
+        if self._is_no_bias(bias):
             return conv1d
         assert len(self.shape_of(bias)) == 1
         bias = relax.op.reshape(bias, (1, -1, 1))
@@ -905,7 +929,7 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
             )
         )
 
-        if bias is None:
+        if self._is_no_bias(bias):
             return conv2d
         assert len(self.shape_of(bias)) == 1
         bias = relax.op.reshape(bias, (1, -1, 1, 1))
@@ -954,7 +978,7 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
             )
         )
 
-        if bias is None:
+        if self._is_no_bias(bias):
             return conv3d
         assert len(self.shape_of(bias)) == 1
         bias = relax.op.reshape(bias, (1, -1, 1, 1, 1))
@@ -1269,9 +1293,13 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
         dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim", 0)
         assert isinstance(dim, int), "Expected 2nd argument of unbind as int"
         selections = self.shape_of(x)[dim].value
-        ret, split = [], self.block_builder.emit(relax.op.split(x, selections, dim))
-        for i in range(selections):
-            ret.append(self.block_builder.emit(relax.op.squeeze(split[i], axis=dim)))
+        ret = []
+        if selections == 1:
+            ret.append(self.block_builder.emit(relax.op.squeeze(x, axis=dim)))
+        else:
+            split = self.block_builder.emit(relax.op.split(x, selections, dim))
+            for i in range(selections):
+                ret.append(self.block_builder.emit(relax.op.squeeze(split[i], axis=dim)))
         return self.block_builder.emit(relax.Tuple(ret))
 
     ########## Statistical ##########
@@ -1369,6 +1397,18 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
         x = self.env[node.args[1]]
         y = self.env[node.args[2]]
         return self.block_builder.emit(relax.op.where(condition, x, y))
+
+    def _bucketize(self, node: fx.Node) -> relax.Var:
+        args = self.retrieve_args(node)
+        input_tensor = args[0]
+        boundaries = args[1]
+
+        right = node.kwargs.get("right", False)
+        out_int32 = node.kwargs.get("out_int32", False)
+
+        return self.block_builder.emit(
+            relax.op.bucketize(input_tensor, boundaries, out_int32, right)
+        )
 
     ########## Manipulation ##########
 
@@ -1979,6 +2019,12 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
                 return self.block_builder.emit(relax.TupleGetItem(x, node.args[1]))
 
             assert isinstance(x.struct_info, relax.TensorStructInfo)
+            if isinstance(node.args[1], int):
+                return x
+            if not isinstance(node.args[1], (list, tuple)):
+                indices = [node.args[1]]
+            else:
+                indices = node.args[1]
             take_indices = []
             take_axes = []
             stride_begin = []
@@ -1989,10 +2035,10 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
             i = 0
             shape = self.shape_of(x)
             non_ellipsis_cnt = 0
-            for index in node.args[1]:
+            for index in indices:
                 if isinstance(index, (int, slice, torch.fx.Node)):
                     non_ellipsis_cnt += 1
-            for index in node.args[1]:
+            for index in indices:
                 if isinstance(index, int):
                     stride_begin.append(index)
                     stride_end.append(index + 1)

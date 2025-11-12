@@ -38,7 +38,7 @@ def verify_model(torch_model, input_info, binding, expected):
     graph_model = fx.symbolic_trace(torch_model)
     with torch.no_grad():
         mod = from_fx(graph_model, input_info)
-    binding = {k: tvm.nd.array(v) for k, v in binding.items()}
+    binding = {k: tvm.runtime.tensor(v) for k, v in binding.items()}
     expected = relax.transform.BindParams("main", binding)(expected)
     tvm.ir.assert_structural_equal(mod, expected)
 
@@ -2166,6 +2166,53 @@ def test_groupnorm():
     binding = {
         "w1": model.gn.weight.detach().numpy(),
         "w2": model.gn.bias.detach().numpy(),
+    }
+    verify_model(model, input_info, binding, expected1)
+
+
+def test_instancenorm2d():
+    torch.set_grad_enabled(False)
+    torch.random.manual_seed(0)
+
+    input_info = [([1, 3, 10, 10], "float32")]
+
+    class InstanceNorm2d(Module):
+        def __init__(self):
+            super().__init__()
+            self.gn = torch.nn.InstanceNorm2d(3)
+
+        def forward(self, input):
+            return self.gn(input)
+
+    @tvm.script.ir_module
+    class expected1:
+        @R.function
+        def main(
+            input_1: R.Tensor((1, 3, 10, 10), dtype="float32"),
+            w1: R.Tensor((3,), dtype="float32"),
+            w2: R.Tensor((3,), dtype="float32"),
+        ) -> R.Tensor((1, 3, 10, 10), dtype="float32"):
+            with R.dataflow():
+                lv: R.Tensor((1, 3, 10, 10), dtype="float32") = R.nn.instance_norm(
+                    input_1,
+                    w1,
+                    w2,
+                    channel_axis=1,
+                    axes=[2, 3],
+                    epsilon=1e-05,
+                    center=True,
+                    scale=True,
+                )
+                gv: R.Tensor((1, 3, 10, 10), dtype="float32") = lv
+                R.output(gv)
+            return gv
+
+    example_args = (torch.randn(1, 3, 10, 10, dtype=torch.float32),)
+
+    model = InstanceNorm2d()
+    binding = {
+        "w1": torch.ones(3).detach().numpy(),
+        "w2": torch.zeros(3).detach().numpy(),
     }
     verify_model(model, input_info, binding, expected1)
 
@@ -4531,9 +4578,9 @@ def test_keep_params():
     params = params["main"]
 
     assert len(params) == len(func.params) - 1
-    for param_var, param_ndarray in zip(func.params[1:], params):
-        assert tuple(x.value for x in param_var.struct_info.shape.values) == param_ndarray.shape
-        assert param_var.struct_info.dtype == param_ndarray.dtype
+    for param_var, param_tensor in zip(func.params[1:], params):
+        assert tuple(x.value for x in param_var.struct_info.shape.values) == param_tensor.shape
+        assert param_var.struct_info.dtype == param_tensor.dtype
 
     tvm.testing.assert_allclose(params[0].numpy(), model.conv.bias.detach().detach().numpy())
     tvm.testing.assert_allclose(params[1].numpy(), model.conv.weight.detach().detach().numpy())
@@ -5825,6 +5872,28 @@ def test_where():
     verify_model(
         Where(), [([5, 3], "bool"), ([5, 3], "float32"), ([5, 3], "float32")], {}, Expected
     )
+
+
+def test_bucketize():
+    class Bucketize(Module):
+        def forward(self, input_tensor, boundaries):
+            return torch.bucketize(input_tensor, boundaries)
+
+    @tvm.script.ir_module
+    class Expected:
+        @R.function
+        def main(
+            input: R.Tensor((5, 3), dtype="float32"), boundaries: R.Tensor((10,), dtype="float32")
+        ) -> R.Tensor((5, 3), dtype="int64"):
+            with R.dataflow():
+                lv: R.Tensor((5, 3), dtype="int64") = R.bucketize(
+                    input, boundaries, out_int32=False, right=False
+                )
+                gv: R.Tensor((5, 3), dtype="int64") = lv
+                R.output(gv)
+            return gv
+
+    verify_model(Bucketize(), [([5, 3], "float32"), ([10], "float32")], {}, Expected)
 
 
 def test_argsort():

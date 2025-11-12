@@ -25,6 +25,7 @@
 #define TVM_RELAX_TYPE_H_
 
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/attrs.h>
 #include <tvm/ir/env_func.h>
 #include <tvm/ir/type.h>
@@ -43,19 +44,11 @@ class ShapeTypeNode : public TypeNode {
   /*! \brief size of the shape. */
   int ndim;
 
-  void VisitAttrs(tvm::AttrVisitor* v) {
-    v->Visit("ndim", &ndim);
-    v->Visit("span", &span);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ShapeTypeNode>().def_ro("ndim", &ShapeTypeNode::ndim);
   }
-
-  bool SEqualReduce(const ShapeTypeNode* other, SEqualReducer equal) const {
-    return equal(ndim, other->ndim);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const { hash_reduce(ndim); }
-
-  static constexpr const char* _type_key = "relax.ShapeType";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ShapeTypeNode, TypeNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.ShapeType", ShapeTypeNode, TypeNode);
 };
 
 class ShapeType : public Type {
@@ -63,7 +56,7 @@ class ShapeType : public Type {
   // TODO(relax-team): remove the default value later.
   TVM_DLL ShapeType(int ndim = kUnknownNDim, Span span = Span());
 
-  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(ShapeType, Type, ShapeTypeNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ShapeType, Type, ShapeTypeNode);
 };
 
 /*!
@@ -81,27 +74,17 @@ class TensorTypeNode : public TypeNode {
   /*! \brief The content data type, use void to denote the dtype is unknown. */
   DataType dtype;
 
-  void VisitAttrs(tvm::AttrVisitor* v) {
-    v->Visit("ndim", &ndim);
-    v->Visit("dtype", &dtype);
-    v->Visit("span", &span);
-  }
-
-  bool SEqualReduce(const TensorTypeNode* other, SEqualReducer equal) const {
-    return equal(ndim, other->ndim) && equal(dtype, other->dtype);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(ndim);
-    hash_reduce(dtype);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TensorTypeNode>()
+        .def_ro("ndim", &TensorTypeNode::ndim)
+        .def_ro("dtype", &TensorTypeNode::dtype);
   }
 
   inline bool IsUnknownNdim() const { return ndim == kUnknownNDim; }
 
   inline bool IsUnknownDtype() const { return dtype.is_void(); }
-
-  static constexpr const char* _type_key = "relax.DynTensorType";
-  TVM_DECLARE_FINAL_OBJECT_INFO(TensorTypeNode, TypeNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.DynTensorType", TensorTypeNode, TypeNode);
 };
 
 /*!
@@ -123,7 +106,7 @@ class TensorType : public Type {
    */
   TVM_DLL static TensorType CreateUnknownNDim(DataType dtype, Span span = Span());
 
-  TVM_DEFINE_OBJECT_REF_METHODS(TensorType, Type, TensorTypeNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TensorType, Type, TensorTypeNode);
 };
 
 using TensorTypeNode = TensorTypeNode;
@@ -131,40 +114,34 @@ using TensorType = TensorType;
 
 class ObjectTypeNode : public TypeNode {
  public:
-  void VisitAttrs(tvm::AttrVisitor* v) { v->Visit("span", &span); }
-
-  bool SEqualReduce(const ObjectTypeNode* other, SEqualReducer equal) const { return true; }
-
-  void SHashReduce(SHashReducer hash_reduce) const { hash_reduce(0); }
-
-  static constexpr const char* _type_key = "relax.ObjectType";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ObjectTypeNode, TypeNode);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ObjectTypeNode>();
+  }
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.ObjectType", ObjectTypeNode, TypeNode);
 };
 
 class ObjectType : public Type {
  public:
   TVM_DLL ObjectType(Span span = Span());
 
-  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(ObjectType, Type, ObjectTypeNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ObjectType, Type, ObjectTypeNode);
 };
 
 class PackedFuncTypeNode : public TypeNode {
  public:
-  void VisitAttrs(tvm::AttrVisitor* v) { v->Visit("span", &span); }
-
-  bool SEqualReduce(const PackedFuncTypeNode* other, SEqualReducer equal) const { return true; }
-
-  void SHashReduce(SHashReducer hash_reduce) const { hash_reduce(0); }
-
-  static constexpr const char* _type_key = "relax.PackedFuncType";
-  TVM_DECLARE_FINAL_OBJECT_INFO(PackedFuncTypeNode, TypeNode);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<PackedFuncTypeNode>();
+  }
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.PackedFuncType", PackedFuncTypeNode, TypeNode);
 };
 
 class PackedFuncType : public Type {
  public:
   TVM_DLL PackedFuncType(Span span = Span());
 
-  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(PackedFuncType, Type, PackedFuncTypeNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(PackedFuncType, Type, PackedFuncTypeNode);
 };
 
 }  // namespace relax

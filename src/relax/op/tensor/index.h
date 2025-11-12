@@ -38,9 +38,10 @@ namespace relax {
  * It is required to be a one-dimensional tensor which has integer dtype.
  * \param axis The axis over which to select values.
  * If it is `std::nullopt`, the input tensor is required to be one-dimensional.
+ * \param mode The mode for handling out-of-bounds indices.
  * \return The taken result.
  */
-Expr take(Expr x, Expr indices, Optional<int64_t> axis);
+Expr take(Expr x, Expr indices, ffi::Optional<int64_t> axis, ffi::String mode = "fast");
 
 /*!
  * \brief Strided slice of a tensor.
@@ -54,8 +55,8 @@ Expr take(Expr x, Expr indices, Optional<int64_t> axis);
  * \param assume_inbound Whether to assume the indices are in bound.
  * \return The sliced result
  */
-Expr strided_slice(Expr x, Expr axes, Expr begin, Expr end, Optional<Expr> strides = std::nullopt,
-                   bool assume_inbound = false);
+Expr strided_slice(Expr x, Expr axes, Expr begin, Expr end,
+                   ffi::Optional<Expr> strides = std::nullopt, bool assume_inbound = false);
 
 }  // namespace relax
 }  // namespace tvm

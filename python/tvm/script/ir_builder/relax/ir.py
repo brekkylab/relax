@@ -30,6 +30,7 @@ from tvm.relax import (
     Expr,
     ExternFunc,
     ShapeExpr,
+    StringImm,
     TupleGetItem,
     Var,
     VarBinding,
@@ -58,11 +59,13 @@ from tvm.relax.op import (
     bitwise_or,
     bitwise_xor,
     broadcast_to,
+    bucketize,
     builtin,
     call_builtin_with_ctx,
     call_dps_packed,
     call_inplace_packed,
     call_pure_packed,
+    call_py_func as _call_py_func,
     call_tir,
     call_tir_inplace,
     call_tir_with_grad,
@@ -185,13 +188,14 @@ from tvm.relax.op import (
     wrap_param,
     zeros,
     zeros_like,
+    vision,
 )
 from tvm.relax.op.builtin import stop_lift_params
 from tvm.relax.struct_info import StructInfo
 from tvm.relax.utils import args_converter, gen_call_tir_inputs
 from tvm.runtime import Object as tvm_Object
-from tvm.runtime import ObjectGeneric
-from tvm.runtime.ndarray import (
+from tvm.runtime import ObjectConvertible
+from tvm.runtime._tensor import (
     cpu,
     cuda,
     device,
@@ -426,11 +430,13 @@ def call_packed(
         sinfo_args = [sinfo_args]
 
     sinfo_args = [
-        sinfo()
-        if callable(sinfo)
-        else sinfo.asobject()
-        if isinstance(sinfo, ObjectGeneric)
-        else sinfo
+        (
+            sinfo()
+            if callable(sinfo)
+            else sinfo.asobject()
+            if isinstance(sinfo, ObjectConvertible)
+            else sinfo
+        )
         for sinfo in sinfo_args
     ]
 
@@ -439,13 +445,64 @@ def call_packed(
         attrs_type_key = kwargs["attrs_type_key"]
         kwargs.pop("attrs_type_key")
     else:
-        attrs_type_key = "DictAttrs"
+        attrs_type_key = "ir.DictAttrs"
         is_default = True
     attrs = None
     if kwargs or not is_default:
         attrs = tvm.ir.attrs.make_node(attrs_type_key, **kwargs)
 
     return Call(op, args, attrs=attrs, sinfo_args=sinfo_args)
+
+
+@args_converter.auto
+def call_py_func(
+    py_func_name: py_str,
+    *args: Expr,
+    out_sinfo: Union[StructInfo, List[StructInfo]],
+) -> Call:
+    """Create a relax Call, which calls a Python function.
+
+    Parameters
+    ----------
+    py_func_name: str
+        The name of the Python function to call. This should correspond to a function
+        in the IRModule's pyfuncs attribute.
+    *args : Expr
+        The arguments.
+    out_sinfo: Union[StructInfo, List[StructInfo]]
+        The structure info of the call_py_func output.
+        It should be a single or a list of TensorStructInfo. Each one denotes the
+        structure info of a returned tensor.
+
+    Returns
+    -------
+    call: Call
+        The created Relax Call for call_py_func operator.
+    """
+    if isinstance(out_sinfo, py_tuple):  # type: ignore
+        out_sinfo = list(out_sinfo)
+    elif not isinstance(out_sinfo, list):
+        out_sinfo = [out_sinfo]
+
+    out_sinfo = [
+        (
+            sinfo()
+            if callable(sinfo)
+            else sinfo.asobject()
+            if isinstance(sinfo, ObjectConvertible)
+            else sinfo
+        )
+        for sinfo in out_sinfo
+    ]
+
+    # Convert string to StringImm
+    try:
+        func_name_imm = (
+            StringImm(py_func_name) if isinstance(py_func_name, py_str) else py_func_name
+        )
+    except (TypeError, ValueError, AttributeError):
+        func_name_imm = StringImm(py_func_name)
+    return _call_py_func(func_name_imm, args, out_sinfo)
 
 
 def _sinfo_arg_wrapper(func):
@@ -459,7 +516,7 @@ def _sinfo_arg_wrapper(func):
             return {_convert_tensor_type(k): _convert_tensor_type(v) for k, v in args.items()}
         if inspect.isfunction(args):
             args = args()
-        if isinstance(args, ObjectGeneric):
+        if isinstance(args, ObjectConvertible):
             args = args.asobject()
         return args
 
@@ -731,6 +788,7 @@ __all__ = [
     "bitwise_or",
     "bitwise_xor",
     "broadcast_to",
+    "bucketize",
     "builtin",
     "call_inplace_packed",
     "call_packed",
@@ -739,6 +797,7 @@ __all__ = [
     "call_tir_inplace",
     "call_tir_with_grad",
     "call_dps_packed",
+    "call_py_func",
     "call_builtin_with_ctx",
     "ceil",
     "clip",
@@ -892,4 +951,5 @@ __all__ = [
     "nn",
     "ccl",
     "erf",
+    "vision",
 ]

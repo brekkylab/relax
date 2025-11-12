@@ -20,8 +20,9 @@ import tvm
 from tvm import te
 
 from ..transform import strided_slice, transpose
-from ..utils import ceil_div, swap
+from ..utils import ceil_div, swap, prod
 from ..math import cast, ceil_log2
+from ..searchsorted import binary_search
 
 
 def _get_threads(ib, nthread_tx, nthread_bx, nthread_by):
@@ -218,11 +219,22 @@ def _sort_common(
     upper_lim = ceil_log2(size)
 
     def get_merge_begin(source, base_idx, aCount, bCount, aStart, bStart, diag, step_count):
-        first = ib.allocate("int64", (1,), name="first", scope="local")
-        mid = ib.allocate("int64", (1,), name="mid", scope="local")
-        last = ib.allocate("int64", (1,), name="last", scope="local")
-        first[0] = tvm.te.max(0, diag - bCount)
-        last[0] = tvm.te.min(diag, aCount)
+        target = tvm.target.Target.current()
+        is_webgpu = "webgpu" in str(target)
+        target_dtype = "int32" if is_webgpu else "int64"
+
+        first = ib.allocate(target_dtype, (1,), name="first", scope="local")
+        mid = ib.allocate(target_dtype, (1,), name="mid", scope="local")
+        last = ib.allocate(target_dtype, (1,), name="last", scope="local")
+        max_val = tvm.te.max(0, diag - bCount)
+        min_val = tvm.te.min(diag, aCount)
+        if is_webgpu:
+            first[0] = cast(max_val, target_dtype)
+            last[0] = cast(min_val, target_dtype)
+        else:
+            first[0] = max_val
+            last[0] = min_val
+
         with ib.while_loop(first[0] < last[0]):
             mid = (first[0] + last[0]) >> 1
             a = source[base_idx + (aStart + mid)]
@@ -249,10 +261,20 @@ def _sort_common(
         first,
         last,
     ):
-        i = ib.allocate("int64", (1,), name="i", scope="local")
-        j = ib.allocate("int64", (1,), name="j", scope="local")
-        i[0] = aStart + first
-        j[0] = bStart + diag - last
+        target = tvm.target.Target.current()
+        is_webgpu = "webgpu" in str(target)
+        target_dtype = "int32" if is_webgpu else "int64"
+        i = ib.allocate(target_dtype, (1,), name="i", scope="local")
+        j = ib.allocate(target_dtype, (1,), name="j", scope="local")
+        i_val = aStart + first
+        j_val = bStart + diag - last
+        if is_webgpu:
+            i[0] = cast(i_val, target_dtype)
+            j[0] = cast(j_val, target_dtype)
+        else:
+            i[0] = i_val
+            j[0] = j_val
+
         with ib.for_range(0, tvm.te.min(aCount + bCount - diag, step_count)) as count:
             i_idx = base_idx + i[0]
             j_idx = base_idx + j[0]
@@ -286,7 +308,9 @@ def _sort_common(
                 with ib.else_scope():
                     assign_j()
 
-    with ib.for_range(0, cast(upper_lim - lower_lim, "int64"), dtype="int64") as l2_width:
+    target = tvm.target.Target.current()
+    target_dtype = "int32" if "webgpu" in str(target) else "int64"
+    with ib.for_range(0, cast(upper_lim - lower_lim, target_dtype), dtype=target_dtype) as l2_width:
         width = 2 << (l2_width + lower_lim)
         # Define and launch the cuda kernel
         with ib.new_scope():
@@ -358,8 +382,10 @@ def _sort_common(
             def mergesort(source, dest, source_idx, dest_idx, size, width, even):
                 # calculate the start, mid, and end points of this section
                 start = width * bz
-                middle = cast(tvm.te.min(start + tvm.tir.indexdiv(width, 2), size), "int64")
-                end = cast(tvm.te.min(start + width, size), "int64")
+                target = tvm.target.Target.current()
+                target_dtype = "int32" if "webgpu" in str(target) else "int64"
+                middle = cast(tvm.te.min(start + tvm.tir.indexdiv(width, 2), size), target_dtype)
+                end = cast(tvm.te.min(start + width, size), target_dtype)
                 with ib.if_scope(start < size):
                     with ib.if_scope(nbx == 1):
                         ## merge the start->middle and middle->end arrays
@@ -937,3 +963,89 @@ def topk_thrust(
         out = out[1]
 
     return out
+
+
+def searchsorted(sorted_sequence, values, right=False, out_dtype="int64"):
+    """Find indices where elements should be inserted to maintain order.
+       If `sorted_sequence` is N-dimensional, the innermost dimension of
+       `values` are searched in the corresponding dimension of `sorted_sequence`.
+
+       This implementation is optimized for GPU execution.
+
+    Parameters
+    ----------
+    sorted_sequence : te.Tensor
+        N-D or 1-D Tensor, containing monotonically increasing sequence
+        on the innermost dimension.
+
+    values : te.Tensor
+        N-D Tensor containing the search values. When `sorted_sequence` is 1-D,
+        the shape of `values` can be arbitrary. Otherwise, ranks of `sorted_sequence`
+        and `values` must be the same, and outer N-1 axes must have the same size.
+
+    right : bool, optional
+        Controls which index is returned if a value lands exactly on one of sorted values. If
+        False (side='left'), the index of the first suitable location found is given. If true
+        (side='right'), return the last such index.
+
+    out_dtype : string, optional
+        The data type of the output indices.
+
+    Returns
+    -------
+    indices : te.Tensor
+        Tensor with same shape as values, representing the indices of
+        elements of `values` if they are inserted in `sorted_sequence`.
+    """
+    if len(sorted_sequence.shape) > 1:
+        for i in range(len(values.shape) - 1):
+            assert (
+                values.shape[i] == sorted_sequence.shape[i]
+            ), "Outer dimensions of sorted_sequence and values must match for N-D searchsorted"
+
+    def ir(sorted_sequence_buf, values_buf, indices_buf):
+        ib = tvm.tir.ir_builder.create()
+        sorted_sequence_shape = sorted_sequence_buf.shape
+        values_shape = values_buf.shape
+        num_search = prod(values_shape)
+        search_range = sorted_sequence_shape[-1]
+
+        sorted_sequence_ptr = ib.buffer_ptr(sorted_sequence_buf)
+        values_ptr = ib.buffer_ptr(values_buf)
+        indices_ptr = ib.buffer_ptr(indices_buf)
+
+        max_threads = int(tvm.target.Target.current(allow_none=False).max_num_threads)
+        nthread_tx = max_threads
+        nthread_bx = ceil_div(num_search, nthread_tx)
+        tx = te.thread_axis("threadIdx.x")
+        bx = te.thread_axis("blockIdx.x")
+        ib.scope_attr(tx, "thread_extent", nthread_tx)
+        ib.scope_attr(bx, "thread_extent", nthread_bx)
+        tid = bx * nthread_tx + tx
+
+        with ib.if_scope(tid < num_search):
+            if len(sorted_sequence_shape) == 1:
+                sequence_offset = 0
+            else:
+                sequence_id = tid // values_shape[-1]
+                sequence_offset = sequence_id * search_range
+
+            indices_ptr[tid] = binary_search(
+                ib,
+                sequence_offset,
+                search_range,
+                sorted_sequence_ptr,
+                values_ptr[tid],
+                right,
+                out_dtype,
+            )
+
+        return ib.get()
+
+    return te.extern(
+        values.shape,
+        [sorted_sequence, values],
+        lambda ins, outs: ir(ins[0], ins[1], outs[0]),
+        name="searchsorted_gpu",
+        dtype=out_dtype,
+    )

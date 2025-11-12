@@ -143,7 +143,7 @@ def layout_transform(
 
     if callable(index_map):
         index_map = IndexMap.from_func(index_map, index_dtype=default_index_dtype)
-    x_dtype = x.checked_type.dtype
+    x_dtype = x.struct_info.dtype
 
     # Explicitly convert python int/float pad_value to the x's type.  If the default behavior
     # is applied, it would be converted to int32/float32, which may not match the x's type.
@@ -624,6 +624,7 @@ def index_put(
     Examples
     --------
     .. code-block:: python
+
         # inputs
         data = torch.zeros(3, 3)
         indices = (torch.tensor([0, 2]), torch.tensor([1, 1]))

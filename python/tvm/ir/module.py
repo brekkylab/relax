@@ -20,7 +20,8 @@ from __future__ import annotations
 
 from typing import Dict, Union
 
-import tvm.ffi
+import tvm
+import tvm_ffi
 from tvm.runtime import Scriptable
 from tvm.runtime.object import Object
 
@@ -30,7 +31,7 @@ from .attrs import DictAttrs
 from .base import Node
 
 
-@tvm.ffi.register_object("IRModule")
+@tvm_ffi.register_object("ir.IRModule")
 class IRModule(Node, Scriptable):
     """IRModule that holds functions and type definitions.
 
@@ -57,7 +58,7 @@ class IRModule(Node, Scriptable):
 
         attrs = None if not attrs else attrs
         if attrs is not None:
-            attrs = tvm.ir.make_node("DictAttrs", **attrs)
+            attrs = tvm.ir.make_node("ir.DictAttrs", **attrs)
         if global_infos is None:
             global_infos = {}
         self.__init_handle_by_constructor__(
@@ -66,6 +67,7 @@ class IRModule(Node, Scriptable):
             attrs,
             global_infos,
         )
+        self.pyfuncs = {}
 
     def clone(self) -> "IRModule":
         return _ffi_api.Module_Clone(self)

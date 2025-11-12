@@ -39,10 +39,10 @@ namespace tvm {
  * Abstract label for an area of memory.
  *
  * Currently uninterpreted and arbitrary. Likely to be replaced by a structured representation
- * of a memory pool in the future. Please try to use this alias instead of String to aid future
+ * of a memory pool in the future. Please try to use this alias instead of ffi::String to aid future
  * code migration.
  */
-using MemoryScope = String;
+using MemoryScope = ffi::String;
 
 // NOTE: cannot use enum as they are out of bound of the original enum
 // and results in an undefined behavior
@@ -169,7 +169,7 @@ constexpr int kInvalidDeviceType = -1;
  * These operations are needed during device planning.
  */
 
-class VirtualDeviceNode : public AttrsNode<VirtualDeviceNode> {
+class VirtualDeviceNode : public AttrsNodeReflAdapter<VirtualDeviceNode> {
  private:
   /*!
    * \brief The \p DLDeviceType (represented as an int) of the virtual device. If \p target is
@@ -243,20 +243,21 @@ class VirtualDeviceNode : public AttrsNode<VirtualDeviceNode> {
     return device;
   }
 
-  TVM_DECLARE_ATTRS(VirtualDeviceNode, "VirtualDevice") {
-    TVM_ATTR_FIELD(device_type_int)
-        .describe("The type of the virtual device.")
-        .set_default(kInvalidDeviceType);
-    TVM_ATTR_FIELD(virtual_device_id)
-        .describe("The device id of the virtual device.")
-        .set_default(-1);
-    TVM_ATTR_FIELD(target)
-        .describe("The target describing how to compile for the virtual device.")
-        .set_default(Target());
-    TVM_ATTR_FIELD(memory_scope)
-        .describe("The area of memory w.r.t. the virtual device where data is stored.")
-        .set_default("");
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<VirtualDeviceNode>()
+        .def_ro("device_type_int", &VirtualDeviceNode::device_type_int,
+                "The type of the virtual device.", refl::DefaultValue(kInvalidDeviceType))
+        .def_ro("virtual_device_id", &VirtualDeviceNode::virtual_device_id,
+                "The device id of the virtual device.", refl::DefaultValue(-1))
+        .def_ro("target", &VirtualDeviceNode::target,
+                "The target describing how to compile for the virtual device.",
+                refl::DefaultValue(Target()))
+        .def_ro("memory_scope", &VirtualDeviceNode::memory_scope,
+                "The area of memory w.r.t. the virtual device where data is stored.",
+                refl::DefaultValue(""));
   }
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("target.VirtualDevice", VirtualDeviceNode, BaseAttrsNode);
 
   friend class VirtualDevice;
 };
@@ -330,7 +331,7 @@ class VirtualDevice : public ObjectRef {
    * \p lhs and \p rhs on all their constrained fields. Returns the null optional if no such
    * join exists, ie there's disagreement on at least one constrained field.
    */
-  static Optional<VirtualDevice> Join(const VirtualDevice& lhs, const VirtualDevice& rhs);
+  static ffi::Optional<VirtualDevice> Join(const VirtualDevice& lhs, const VirtualDevice& rhs);
 
   /*!
    * \brief Returns the 'default' of \p lhs and \p rhs. The result will be \p lhs, except any
@@ -338,7 +339,7 @@ class VirtualDevice : public ObjectRef {
    */
   static VirtualDevice Default(const VirtualDevice& lhs, const VirtualDevice& rhs);
 
-  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(VirtualDevice, ObjectRef, VirtualDeviceNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(VirtualDevice, ObjectRef, VirtualDeviceNode);
 
   friend class VirtualDeviceCache;  // Private implementation helper.
 };
