@@ -1,5 +1,7 @@
+mod params;
 mod rtensor;
 
+pub use params::*;
 pub use rtensor::*;
 
 #[cfg(test)]
