@@ -31,7 +31,8 @@ fn main() {
     let cmake_source_path = PathBuf::new().join("..").join("..");
     let mut cfg = cmake::Config::new(cmake_source_path);
     cfg.define("CMAKE_BUILD_TYPE", "Release")
-    .define("TVM_FFI_BUILD_TESTS", option_value("TVM_FFI_BUILD_TESTS"))
+        .define("INSTALL_DEV", "OFF")
+        .define("BUILD_DUMMY_LIBTVM", "ON")
         .define("USE_LIBBACTRACE", "OFF")
         .define("TVM_FFI_USE_LIBBACKTRACE", "OFF")
         .define(
@@ -45,5 +46,5 @@ fn main() {
         .very_verbose(true);
     let lib_dir = cfg.build().join("lib");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    println!("cargo:rustc-link-lib=static=tvm_ffi_static");
+    println!("cargo:rustc-link-lib=dylib=tvm_runtime");
 }
