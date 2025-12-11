@@ -27,3 +27,8 @@ license = "Apache-2.0"
 [lib]
 name = "tvm_runtime"
 crate-type = ["lib"]
+
+[dependencies]
+tvm-ffi-sys = { path = "../../3rdparty/tvm-ffi/rust/tvm-ffi-sys" }
+tvm-ffi = { path = "../../3rdparty/tvm-ffi/rust/tvm-ffi" }
+tvm-runtime-sys = { path = "../tvm-runtime-sys" }
