@@ -38,6 +38,7 @@ unsafe impl NDAllocator for DeviceNDAlloc {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct RTensor {
     shape: Vec<i64>,
     dltensor: DLTensor,
@@ -48,12 +49,11 @@ unsafe impl Send for RTensor {}
 impl RTensor {
     pub fn new(
         device: DLDevice,
-        ndim: i32,
-        dtype: DLDataType,
         shape: impl IntoIterator<Item = impl Into<i64>>,
-        byte_offset: u64,
+        dtype: DLDataType,
     ) -> Self {
         let mut shape = shape.into_iter().map(|v| v.into()).collect::<Vec<_>>();
+        let ndim = shape.len() as i32;
         let mut dltensor = DLTensor {
             data: null_mut(),
             device,
@@ -61,7 +61,7 @@ impl RTensor {
             dtype,
             shape: shape.as_mut_ptr(),
             strides: null_mut(),
-            byte_offset,
+            byte_offset: 0,
         };
         dltensor.data = unsafe { DeviceNDAlloc {}.alloc_data(&dltensor) };
         Self { shape, dltensor }

@@ -6,11 +6,13 @@ pub use rtensor::*;
 
 #[cfg(test)]
 mod tests {
-    use tvm_ffi::{DLDataType, DLDataTypeCode, DLDevice};
+    use std::path::PathBuf;
+    use tvm_ffi::{DLDataType, DLDataTypeCode, DLDevice, DLDeviceType};
 
     use super::*;
 
     const RT_FILENAME: &str = "";
+    const TENSOR_CACHE_PATH: &str = "";
 
     #[test]
     fn test_module() -> () {
@@ -33,14 +35,11 @@ mod tests {
                 2i32,                                   // host_vm_allocator_type
             ))
             .unwrap();
-        let metadata: tvm_ffi::String = vm
-            .get_function("_metadata")
-            .unwrap()
-            .call_tuple(())
-            .unwrap()
-            .try_into()
-            .unwrap();
-        println!("{}", metadata.to_string());
+
+        let tensor_cache_path = PathBuf::from(TENSOR_CACHE_PATH);
+        let tensor_cache =
+            TensorCache::from(&tensor_cache_path, DLDeviceType::kDLMetal, 0).unwrap();
+        println!("{:?}", tensor_cache);
     }
 
     #[test]
@@ -50,14 +49,12 @@ mod tests {
                 device_type: tvm_ffi::DLDeviceType::kDLMetal,
                 device_id: 0,
             },
-            2,
+            [3, 3],
             DLDataType {
                 code: DLDataTypeCode::kDLFloat as u8,
                 bits: 32,
                 lanes: 1,
             },
-            [3, 3],
-            0,
         );
         let mut src = Vec::<f32>::new();
         for _ in 0..9 {
