@@ -540,8 +540,13 @@ else()
     $<TARGET_OBJECTS:tvm_libinfo_objs>
     ${TVM_RUNTIME_EXT_OBJS}
   )
-  set_property(TARGET tvm_runtime APPEND PROPERTY LINK_OPTIONS "${TVM_NO_UNDEFINED_SYMBOLS}")
-  target_link_libraries(tvm_runtime PUBLIC tvm_ffi_shared)
+  # FIX(brekkylab): allow undefined symbols for tvm_runtime
+  if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin" OR ${CMAKE_SYSTEM_NAME} MATCHES "iOS")
+    set(TVM_ALLOW_UNDEFINED_SYMBOLS "-Wl,-undefined,dynamic_lookup")
+  else()
+    set(TVM_ALLOW_UNDEFINED_SYMBOLS "-Wl,--allow-shlib-undefined")
+  endif()
+  set_property(TARGET tvm_runtime APPEND PROPERTY LINK_OPTIONS "${TVM_ALLOW_UNDEFINED_SYMBOLS}")
 endif()
 
 
