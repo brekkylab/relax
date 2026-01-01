@@ -1464,6 +1464,39 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     }
   }
 
+  void AppendMHAKV(int64_t layer_id, Tensor k_data, Tensor v_data) final {
+    // Shape and dtype check.
+    int64_t local_layer_id = layer_id - layer_id_begin_offset_;
+    CHECK_GE(local_layer_id, 0);
+    CHECK_LT(local_layer_id, num_layers_);
+    Tensor pages = pages_[local_layer_id];
+    CHECK(k_data.DataType() == pages.DataType());
+    CHECK(v_data.DataType() == pages.DataType());
+    CHECK(attn_kinds_[layer_id] == AttnKind::kMLA);
+
+    // k_data: (num_total_length, num_kv_heads, qk_head_dim)
+    CHECK_EQ(k_data->ndim, 3);
+    // v_data: (num_total_length, num_kv_heads, qk_head_dim)
+    CHECK_EQ(v_data->ndim, 3);
+    int64_t total_seq_length = 0;
+    for (int64_t seq_id = 0; seq_id < cur_batch_size_; ++seq_id) {
+      total_seq_length += cur_append_lengths_[seq_id];
+    }
+    CHECK_LE(k_data->shape[0], total_seq_length);
+    CHECK_LE(k_data->shape[1], total_seq_length);
+    CHECK_LE(v_data->shape[0], num_kv_heads_);
+    CHECK_LE(v_data->shape[1], num_kv_heads_);
+    CHECK_LE(k_data->shape[2], qk_head_dim_);
+    CHECK_LE(v_data->shape[2], qk_head_dim_);
+    // Sync the copy stream and the compute stream.
+    ComputeStreamWaitForCopyStream();
+    // The auxiliary data structure on device must have been synchronized.
+    ICHECK(!dirty_aux_data_device_);
+
+    CHECK(f_transpose_append_mha_.defined());
+    f_transpose_append_mha_.value()(pages_[local_layer_id], k_data, v_data, append_position_map_view_);
+  }
+
   void AppendMLAKV(int64_t layer_id, Tensor kv_data) final {
     // Shape and dtype check.
     int64_t local_layer_id = layer_id - layer_id_begin_offset_;

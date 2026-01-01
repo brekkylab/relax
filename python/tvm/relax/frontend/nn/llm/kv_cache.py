@@ -214,6 +214,25 @@ class PagedKVCache(Object):  # pylint: disable=too-few-public-methods
         o = Tensor(_expr=bb.emit(rx.TupleGetItem(attn_results, 0))).reshape(b, s, h_qo, v_head_dim)
         lse = Tensor(_expr=bb.emit(rx.TupleGetItem(attn_results, 1))).reshape(b, s, h_qo)
         return o, lse
+    
+    def append_mha_kv(self, layer_id: int, k: Tensor, v: Tensor) -> "PagedKVCache":
+        """Fine-grained API that appends the MHA K/V data to KV cache."""
+        # pylint: disable=protected-access
+        b, s, h_kv, d_qk = k._expr.struct_info.shape
+        b, s, h_kv, d_qk = v._expr.struct_info.shape
+        k = k.reshape(b * s, h_kv, d_qk)
+        v = v.reshape(b * s, h_kv, d_qk)
+        return PagedKVCache(
+            _expr=rx.call_pure_packed(
+                "vm.builtin.attention_kv_cache_append_mha_kv",
+                self._expr,
+                rx.PrimValue(layer_id),  # type: ignore[arg-type]
+                k._expr,
+                v._expr,
+                sinfo_args=rx.ObjectStructInfo(),
+            ),
+            _name="paged_kv_cache",
+        )
 
     def append_mla_kv(self, layer_id: int, kv: Tensor) -> "PagedKVCache":
         """Fine-grained API that appends the MLA K/V data to KV cache."""

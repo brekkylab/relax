@@ -207,6 +207,14 @@ class AttentionKVCacheObj : public KVStateObj {
                               double sm_scale) = 0;
 
   /*!
+   * \brief Fine-grained API that appends the MHA K/V data to KV cache.
+   * \param layer_id The model layer where the attention compute happens.
+   * \param k_data The input K data to append, in layout `(num_total_length, num_kv_heads, qk_head_dim)`.
+   * \param v_data The input V data to append, in layout `(num_total_length, num_kv_heads, qk_head_dim)`.
+   */
+  virtual void AppendMHAKV(int64_t layer_id, Tensor k_data, Tensor v_data) = 0;
+
+  /*!
    * \brief Fine-grained API that appends the MLA K/V data to KV cache.
    * \param layer_id The model layer where the attention compute happens.
    * \param kv_data The input KV data to append, in layout `(total_length, qk_head_dim)`.
