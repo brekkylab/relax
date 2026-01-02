@@ -219,8 +219,8 @@ class PagedKVCache(Object):  # pylint: disable=too-few-public-methods
         """Fine-grained API that appends the MHA K/V data to KV cache."""
         # pylint: disable=protected-access
         b, s, h_kv, d_qk = k._expr.struct_info.shape
-        b, s, h_kv, d_qk = v._expr.struct_info.shape
         k = k.reshape(b * s, h_kv, d_qk)
+        b, s, h_kv, d_qk = v._expr.struct_info.shape
         v = v.reshape(b * s, h_kv, d_qk)
         return PagedKVCache(
             _expr=rx.call_pure_packed(
