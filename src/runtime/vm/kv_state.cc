@@ -94,6 +94,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              kv_cache->CrossAttention(layer_id, std::move(q_data), std::move(o_data),
                                       std::move(lse_data), sm_scale);
            })
+      .def("vm.builtin.attention_kv_cache_append_mha_kv",
+           [](AttentionKVCache kv_cache, int64_t layer_id, Tensor k_data, Tensor v_data) {
+             kv_cache->AppendMHAKV(layer_id, std::move(k_data), std::move(v_data));
+             return kv_cache;
+           })
       .def("vm.builtin.attention_kv_cache_append_mla_kv",
            [](AttentionKVCache kv_cache, int64_t layer_id, Tensor kv_data) {
              kv_cache->AppendMLAKV(layer_id, std::move(kv_data));
