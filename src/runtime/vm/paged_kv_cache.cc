@@ -1418,7 +1418,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     ICHECK(!dirty_aux_data_device_);
 
     if (attn_kind == AttnKind::kMHA || attn_kind == AttnKind::kMHASliding) {
-      MHASelfAttnInternal(layer_id, q_data, k_data, v_data, o_data, lse_data, sm_scale);
+      MHASelfAttnInternal(local_layer_id, q_data, k_data, v_data, o_data, lse_data, sm_scale);
     } else {
       MLASelfAttnInternal(q_data, k_data, v_data, o_data, lse_data, sm_scale);
     }
@@ -1456,7 +1456,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // The auxiliary data structure on device must have been synchronized.
     ICHECK(!dirty_aux_data_device_);
 
-    if (attn_kind == AttnKind::kMHA) {
+    if (attn_kind == AttnKind::kMHA || attn_kind == AttnKind::kMHASliding) {
       MHACrossAttnInternal(local_layer_id, q_data, o_data, lse_data, sm_scale,
                            /*is_first_kernel=*/true);
     } else {
@@ -1472,7 +1472,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     Tensor pages = pages_[local_layer_id];
     CHECK(k_data.DataType() == pages.DataType());
     CHECK(v_data.DataType() == pages.DataType());
-    CHECK(attn_kinds_[layer_id] == AttnKind::kMLA);
+    CHECK(attn_kinds_[layer_id] == AttnKind::kMHA || attn_kinds_[layer_id] == AttnKind::kMHASliding);
 
     // k_data: (num_total_length, num_kv_heads, qk_head_dim)
     CHECK_EQ(k_data->ndim, 3);
@@ -1483,8 +1483,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       total_seq_length += cur_append_lengths_[seq_id];
     }
     CHECK_LE(k_data->shape[0], total_seq_length);
-    CHECK_LE(k_data->shape[1], total_seq_length);
-    CHECK_LE(v_data->shape[0], num_kv_heads_);
+    CHECK_LE(k_data->shape[1], num_kv_heads_);
+    CHECK_LE(v_data->shape[0], total_seq_length);
     CHECK_LE(v_data->shape[1], num_kv_heads_);
     CHECK_LE(k_data->shape[2], qk_head_dim_);
     CHECK_LE(v_data->shape[2], qk_head_dim_);
